@@ -6,20 +6,22 @@ import subprocess
 import tempfile
 import logging
 
-from flask import Flask, request, jsonify
-app = Flask('AlpinoServer')
+from flask import Flask, request, jsonify, Response
+app = Flask('NewsreaderServer')
 
 @app.route('/', methods=['GET'])
 def index():
-    return 'Simple web API for alpino at /parse, (<a href="/parse?text=dit is een test">example</a>). See <a href="github.com/vanatteveldt/alpinoserver">vanatteveldt/alpinoserver</a> for more information.', 200
+    return 'Simple web API for and alpino, see  this <a href="/parse?text=dit is een test">example</a>) and see <a href="http://github.com/vanatteveldt/alpino-server">vanatteveldt/alpino-server</a> for more information.', 200
+
 
 @app.route('/parse', methods=['GET'])
 def parse_get():
     text = request.args.get('text', None)
     output = request.args.get('output', "dependencies")
+    tokenized = request.args.get('tokenized', "N") in ('Y', 'y', '1', 1)
     if not text:
         return "Usage: /parse?text=text_to_parse[&output=output]", 400
-    result = parse(text, output=output)
+    result = parse(text, output=output, tokenized=tokenized)
     return jsonify(result)
 
 
@@ -28,7 +30,8 @@ def parse_post():
     body = request.get_json(force=True)
     text = body['text']
     output = body.get("output", "dependencies")
-    result = parse(text, output=output)
+    tokenized = bool(body.get('tokenized', False))
+    result = parse(text, output=output, tokenized=tokenized)
     return jsonify(result)
 
 
@@ -40,7 +43,7 @@ def tokenize(text: str) -> str:
     return call_alpino_stdout(CMD_TOKENIZE, text).replace("|", "")
 
 
-def parse(text, output='dependencies'):
+def parse(text, output='dependencies', tokenized=False):
     """Parse the text to the given output
 
     Output matches to end_hook except for treebank_triples,
@@ -52,13 +55,14 @@ def parse(text, output='dependencies'):
              for xml, a dict of {fn: "xml"};
              for treebank_triples, a dict {"fn": {"triples": [triples], xml: "xml"}}
     """
-    tokens = tokenize(text)
+    if not tokenized:
+        text = tokenize(text)
     if output == "dependencies":
-        return alpino_dependencies(tokens)
+        return alpino_dependencies(text)
     elif output  == "xml":
-        return alpino_xml(tokens)
+        return alpino_xml(text)
     elif output == "treebank_triples":
-        return alpino_treebank_triples(tokens)
+        return alpino_treebank_triples(text)
     else:
         raise ValueError("Unknown output: {}".format(output))
 
@@ -101,14 +105,17 @@ def alpino_treebank_triples(input: str) -> dict:
         fns = {os.path.join(d, "{id}.xml".format(id=id)): id for id in result.keys()}
         cmd = ["bin/Alpino", "-treebank_triples"] + list(fns.keys())
         triples = call_alpino_stdout(cmd)
-        read_triples_into_dict(triples, result, strip_id=True)
+        for line in triples.split("\n"):
+            if line.strip():
+                triple, fn = line.rsplit("|", 1)
+                id = os.path.basename(fn).split(".")[0]
+                result[id].setdefault('triples', []).append(triple)
         return result
 
 
 def alpino_xml_raw(input: str, treebank: str) -> dict:
     cmd = ["bin/Alpino", "end_hook=xml", "-parse", "-flag", "treebank", treebank]
     out, err = call_alpino(cmd, input)
-    print(treebank, os.listdir(treebank))
     result = {os.path.splitext(fn)[0]: {"xml": open(os.path.join(treebank, fn)).read()} for fn in os.listdir(treebank)}
     if not result:
         _alpino_error(cmd, input, err)
@@ -150,7 +157,7 @@ if __name__ == '__main__':
     parser.add_argument("--debug", "-d", help="Set debug mode", action="store_true")
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.DEBUG if (args.debug or args.verbose) else logging.INFO,
+    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,
                         format='[%(asctime)s %(name)-12s %(levelname)-5s] %(message)s')
 
     app.run(port=args.port, host=args.host, debug=args.debug)
