@@ -6,33 +6,84 @@ import subprocess
 import tempfile
 import logging
 
-from flask import Flask, request, jsonify, Response
+from KafNafParserPy import KafNafParser
+from lxml.etree import XMLSyntaxError
+
+import alpinonaf
+from flask import Flask, request, jsonify, Response, make_response
+from io import BytesIO
+
 app = Flask('NewsreaderServer')
+
+
+NAF_HEADER = {'Content-type': 'application/naf+xml',
+              'Content-Disposition': 'attachment; filename="result.naf"'}
+
 
 @app.route('/', methods=['GET'])
 def index():
-    return 'Simple web API for and alpino, see  this <a href="/parse?text=dit is een test">example</a>) and see <a href="http://github.com/vanatteveldt/alpino-server">vanatteveldt/alpino-server</a> for more information.', 200
+    return 'Simple web API for alpino, see  this <a href="/parse?text=dit is een test">example</a>) and see <a href="http://github.com/vanatteveldt/alpino-server">vanatteveldt/alpino-server</a> for more information.', 200
 
 
-@app.route('/parse', methods=['GET'])
-def parse_get():
-    text = request.args.get('text', None)
-    output = request.args.get('output', "dependencies")
+@app.route('/parse/', methods=['GET', 'POST'])
+@app.route('/parse/<output>', methods=['GET', 'POST'])
+def parse(output="dependencies"):
     tokenized = request.args.get('tokenized', "N") in ('Y', 'y', '1', 1)
-    if not text:
-        return "Usage: /parse?text=text_to_parse[&output=output]", 400
-    result = parse(text, output=output, tokenized=tokenized)
-    return jsonify(result)
+    if request.method == "GET":
+        body = request.args.get('text', None).encode("utf-8")
+    else:
+        body = request.get_data()
+
+    if not body:
+        raise Exception("Please provide text as POST data or GET text= parameter")
+
+    if output == 'naf':
+        return Response(parse_naf(BytesIO(body)), status=200, headers=NAF_HEADER)
+    elif output == 'nerc':
+        parsed = get_parsed_naf(body)
+        result = do_nerc(parsed)
+        return Response(result, status=200, headers=NAF_HEADER)
+    else:
+        result = parse(body.decode("utf-8"), output, tokenized)
+        return jsonify(result), 200
 
 
-@app.route('/parse', methods=['POST'])
-def parse_post():
-    body = request.get_json(force=True)
-    text = body['text']
-    output = body.get("output", "dependencies")
-    tokenized = bool(body.get('tokenized', False))
-    result = parse(text, output=output, tokenized=tokenized)
-    return jsonify(result)
+def parse_naf(input):
+    out = BytesIO()
+    alpinonaf.parse(input).dump(out)
+    return out.getvalue()
+
+
+def do_nerc(input):
+    if not ("NERC_JAR" in os.environ and "NERC_MODEL" in os.environ):
+        raise Exception("Please specify NERC_JAR and NERC_MODEL!")
+    nerc_jar = os.environ["NERC_JAR"]
+    nerc_model = os.environ["NERC_MODEL"]
+    if not os.path.exists(nerc_jar):
+        raise Exception("NERC jar not found at {nerc_jar}".format(**locals()))
+    if not os.path.exists(nerc_model):
+        raise Exception("NERC model not found at {nerc_model}".format(**locals()))
+    cmd=["java", "-jar", nerc_jar, "tag", "-m", nerc_model]
+    p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    out, _err = p.communicate(input)
+    return out
+
+
+
+
+def get_parsed_naf(body):
+    try:
+        naf = KafNafParser(BytesIO(body))
+        deps = list(naf.get_dependencies())
+        if deps:
+            logging.debug("Input already parsed")
+            return body
+        else:
+            logging.debug("Parsing from NAF")
+            return parse_naf(naf)
+    except XMLSyntaxError:
+        logging.debug("Parsing from raw text")
+        return parse_naf(BytesIO(body))
 
 
 # Alpino functions
@@ -55,6 +106,7 @@ def parse(text, output='dependencies', tokenized=False):
              for xml, a dict of {fn: "xml"};
              for treebank_triples, a dict {"fn": {"triples": [triples], xml: "xml"}}
     """
+
     if not tokenized:
         text = tokenize(text)
     if output == "dependencies":
