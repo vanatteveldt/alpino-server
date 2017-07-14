@@ -212,4 +212,4 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,
                         format='[%(asctime)s %(name)-12s %(levelname)-5s] %(message)s')
 
-    app.run(port=args.port, host=args.host, debug=args.debug)
+    app.run(port=args.port, host=args.host, debug=args.debug, threaded=True)
