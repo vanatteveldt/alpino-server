@@ -9,7 +9,7 @@ RUN git clone https://github.com/ixa-ehu/ixa-pipe-nerc && (cd ixa-pipe-nerc && g
 
 # Get and unpack NERC models
 RUN curl http://i.amcat.nl/nerc-models-1.5.4-nl.tgz | tar xz
-RUN pip3 install alpinonaf>=0.4  git+https://github.com/vanatteveldt/coref_draft.git
+RUN pip3 install alpinonaf>=0.4  git+https://github.com/antske/coref_draft.git
 
 ENV NERC_MODEL=nerc-models-1.5.4/nl/nl-6-class-clusters-sonar.bin NERC_JAR=ixa-pipe-nerc/target/ixa-pipe-nerc-1.6.1-exec.jar
 
