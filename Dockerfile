@@ -5,7 +5,7 @@ EXPOSE 5002
 RUN apt-get -qq update && apt-get install -y python3-flask python3-pip python3-lxml openjdk-8-jdk maven git
 
 # Build NERC
-RUN git clone https://github.com/ixa-ehu/ixa-pipe-nerc && (cd ixa-pipe-nerc && mvn clean package)
+RUN git clone https://github.com/ixa-ehu/ixa-pipe-nerc --branch 1.5.4 && (cd ixa-pipe-nerc && mvn clean package)
 
 # Get and unpack NERC models
 RUN curl http://i.amcat.nl/nerc-models-1.5.4-nl.tgz | tar xz
